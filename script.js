@@ -6,16 +6,23 @@ Promise.all([
     faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
 ]).then(start);
 
-function start() {
+async function start() {
     const container = document.createElement("div");
     container.style.position = "relative";
     document.body.append(container);
+
+    const labeledFaceDescriptors = await loadLabeledImages();
+    const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
     document.body.append("Loaded");
 
+    let image, canvas;
+
     imageUpload.addEventListener("change", async () => {
-        const image = await faceapi.bufferToImage(imageUpload.files[0]);
+        if (image) image.remove();
+        image = await faceapi.bufferToImage(imageUpload.files[0]);
         container.append(image);
-        const canvas = faceapi.createCanvasFromMedia(image);
+        if (canvas) canvas.remove();
+        canvas = faceapi.createCanvasFromMedia(image);
         container.append(canvas);
 
         const displaySize = { width: image.width, height: image.height };
@@ -27,9 +34,14 @@ function start() {
             .withFaceDescriptors();
 
         const resizeDetections = faceapi.resizeResults(detections, displaySize);
-        resizeDetections.forEach((detection) => {
-            const box = detection.detection.box;
-            const drawBox = new faceapi.draw.DrawBox(box, { label: "Face" });
+        const results = resizeDetections.map((d) =>
+            faceMatcher.findBestMatch(d.descriptor)
+        );
+        results.forEach((result, i) => {
+            const box = resizeDetections[i].detection.box;
+            const drawBox = new faceapi.draw.DrawBox(box, {
+                label: result.toString(),
+            });
             drawBox.draw(canvas);
         });
     });
@@ -45,4 +57,21 @@ function loadLabeledImages() {
         "Thor",
         "Tony Stark",
     ];
+    return Promise.all(
+        labels.map(async (label) => {
+            let descriptions = [];
+            for (let i = 1; i <= 2; i++) {
+                const img = await faceapi.fetchImage(
+                    `https://raw.githubusercontent.com/ahmedashfaq027/face-recognition/master/labeled_images/${label}/${i}.jpg`
+                );
+                const detections = await faceapi
+                    .detectSingleFace(img)
+                    .withFaceLandmarks()
+                    .withFaceDescriptor();
+                descriptions.push(detections.descriptor);
+            }
+
+            return new faceapi.LabeledFaceDescriptors(label, descriptions);
+        })
+    );
 }
